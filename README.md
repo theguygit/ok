@@ -57,4 +57,3 @@ The model uses a dual-encoder architecture:
 - **Text Encoder**: RoBERTa-base
 - **Audio Encoder**: Wav2Vec 2.0 (pre-computed features)
 - **Classifier**: Multi-task heads for Emotion Classification and Causal Distance Prediction.
-
