@@ -1,0 +1,14 @@
+torch
+torchinfo
+transformers
+pandas
+numpy
+matplotlib
+seaborn
+librosa
+scikit-learn
+tqdm
+wordcloud
+moviepy
+gradio
+static-ffmpeg
