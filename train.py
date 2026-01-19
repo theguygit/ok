@@ -46,28 +46,57 @@ def train():
                           os.path.join(CONFIG['base_path'], 'dev_audio_features.pkl'), tokenizer, CONFIG['max_len'])
     dev_loader = DataLoader(dev_ds, batch_size=32, shuffle=False)
 
+    save_path = os.path.join(CONFIG['base_path'], CONFIG['model_save_path'])
     model = DualStreamMECPE().to(device)
+    
+    # Load checkpoint to train deeper
+    if os.path.exists(save_path):
+        print(f"🔄 Resuming from checkpoint: {save_path}")
+        model.load_state_dict(torch.load(save_path, map_location=device))
+    else:
+        print("🆕 No checkpoint found, starting fresh.")
 
-    # Differential Learning Rates
     bert_params = [p for n, p in model.named_parameters() if "roberta" in n]
     head_params = [p for n, p in model.named_parameters() if "roberta" not in n]
     optimizer = AdamW([{'params': bert_params, 'lr': CONFIG['lr']},
                        {'params': head_params, 'lr': CONFIG['head_lr']}], weight_decay=CONFIG['weight_decay'])
 
-    # Smoothed Weights
+    total_steps = len(train_loader) * CONFIG['epochs']
+    warmup_steps = int(0.1 * total_steps)
+    
+    from transformers import get_cosine_schedule_with_warmup
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps
+    )
+
     print("Calculating Class Weights...")
-    counts = collections.Counter()
+    # 1. Cause Weights
+    counts_c = collections.Counter()
     for idx, row in train_ds.df.iterrows():
         did, uid = row['Dialogue_ID'], row['Utterance_ID']
         key = f"dia{did}_utt{uid}"
         lbl = train_ds.cause_map.get(key, -1)
         if lbl != -1:
-            counts[lbl] += 1
-            
-    weights = torch.tensor([np.sqrt(sum(counts.values())/(counts.get(i, 0)+1)) for i in range(6)]).float().to(device)
+            counts_c[lbl] += 1
+    
+    weights_c = torch.tensor([np.sqrt(sum(counts_c.values())/(counts_c.get(i, 0)+1)) for i in range(6)]).float().to(device)
+    weights_c = torch.clamp(weights_c, 1.0, 10.0) # Prevent extreme values
 
-    criterion_e = nn.CrossEntropyLoss()
-    criterion_c = nn.CrossEntropyLoss(weight=weights, ignore_index=-1)
+    # 2. Emotion Weights
+    from config import EMOTION_MAP
+    counts_e = collections.Counter(train_ds.df['Emotion'].str.lower())
+    total_e = len(train_ds.df)
+    weights_e = []
+    for emo in EMOTION_MAP.keys():
+        count = counts_e.get(emo, 1) 
+        weights_e.append(np.sqrt(total_e / count))
+    weights_e = torch.tensor(weights_e).float().to(device)
+    weights_e = torch.clamp(weights_e, 1.0, 10.0) # Prevent extreme values
+
+    criterion_e = nn.CrossEntropyLoss(weight=weights_e, label_smoothing=0.1)
+    criterion_c = nn.CrossEntropyLoss(weight=weights_c, ignore_index=-1, label_smoothing=0.1)
 
     best_score = 0
     save_path = os.path.join(CONFIG['base_path'], CONFIG['model_save_path'])
@@ -80,6 +109,10 @@ def train():
         'val_emo_f1': [],
         'val_cause_f1': []
     }
+
+    # Early Stopping variables
+    patience_counter = 0
+    best_loss = float('inf')
 
     print(f"Starting training on {device}...")
     
@@ -98,9 +131,17 @@ def train():
 
             optimizer.zero_grad()
             out_e, out_c = model(ids, mask, audio)
-            loss = (0.3 * criterion_e(out_e, lbl_e)) + (0.7 * criterion_c(out_c, lbl_c))
+            # Give slightly more weight to Cause (0.6) as it is the harder task
+            loss = (0.4 * criterion_e(out_e, lbl_e)) + (0.6 * criterion_c(out_c, lbl_c))
+            
+            if torch.isnan(loss):
+                print("   [Warning] NaN loss detected! Skipping batch.")
+                continue
+                
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            scheduler.step()
             train_loss += loss.item()
             pbar.set_postfix({'loss': f"{loss.item():.4f}"})
             
@@ -166,12 +207,19 @@ def train():
             print(f"   [Val]   Cause F1: {val_f1_c:.4f} || Emo F1: {val_f1_e:.4f}")
             print(f"   [Val]   Pred Dist: {dict(Counter(preds))}")
             
-            # Weighted combined score: 70% Cause + 30% Emotion (matches loss weighting)
-            current_score = (0.7 * val_f1_c) + (0.3 * val_f1_e)
+            current_score = (0.5 * val_f1_c) + (0.5 * val_f1_e)
             if current_score > best_score:
                 best_score = current_score
                 torch.save(model.state_dict(), save_path)
                 print(f"✅ New Best Model Saved (Weighted F1: {best_score:.4f} | Cause: {val_f1_c:.4f} | Emo: {val_f1_e:.4f})")
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                print(f"   [Info] Score did not improve (Patience: {patience_counter}/{CONFIG['early_stopping_patience']})")
+            
+            if patience_counter >= CONFIG['early_stopping_patience']:
+                print(f"\n⏹️ Early stopping triggered after {epoch+1} epochs!")
+                break
         else:
              print(f"   [Val] No valid cause labels in dev set.")
 

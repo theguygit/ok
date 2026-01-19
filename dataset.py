@@ -129,7 +129,7 @@ class MECPEDataset(Dataset):
                                         mapped_count += 1
                         except: pass
         
-        print(f"✅ Dataset Loaded: Mapped {mapped_count} cause labels via matched IDs.")
+        print(f"Dataset Loaded: Mapped {mapped_count} cause labels via matched IDs.")
 
     def __len__(self): return len(self.df)
 

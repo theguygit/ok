@@ -41,8 +41,8 @@ def extract_features(video_folder, output_pkl):
     audio_features_dict = {}
     error_files = []
 
-    video_files = [f for f in os.listdir(video_folder) if f.endswith('.mp4')]
-    print(f"Found {len(video_files)} video files.")
+    video_files = [f for f in os.listdir(video_folder) if f.endswith('.mp4') and not f.startswith('._')]
+    print(f"Found {len(video_files)} valid video files.")
 
     for video_file in tqdm(video_files):
         video_path = os.path.join(video_folder, video_file)

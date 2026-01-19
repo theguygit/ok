@@ -25,9 +25,9 @@ def load_model_for_eval(device):
     path = os.path.join(CONFIG['base_path'], CONFIG['model_save_path'])
     if os.path.exists(path):
         model.load_state_dict(torch.load(path, map_location=device))
-        print(f"✅ Loaded model from {path}")
+        print(f"Loaded model from {path}")
     else:
-        print(f"⚠️ Warning: Model file not found at {path}")
+        print(f"Warning: Model file not found at {path}")
     model.to(device)
     model.eval()
     return model
@@ -49,7 +49,7 @@ def plot_cm(y_true, y_pred, title, labels, cmap='Blues'):
     filename = title.lower().replace(' ', '_').replace('(', '').replace(')', '') + '.png'
     save_path = os.path.join(CONFIG['base_path'], filename)
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    print(f"✅ Saved: {save_path}")
+    print(f"Saved: {save_path}")
     plt.close()
 
 def evaluate_set(loader, model, device, title_suffix="(Validation)"):
@@ -84,7 +84,7 @@ def evaluate_set(loader, model, device, title_suffix="(Validation)"):
     print(f"EMOTION RECOGNITION {title_suffix}")
     print("="*40)
     emotion_names = list(EMOTION_MAP.keys())
-    print(classification_report(all_labels_e, all_preds_e, target_names=emotion_names))
+    print(classification_report(all_labels_e, all_preds_e, target_names=emotion_names, zero_division=0))
     plot_cm(all_labels_e, all_preds_e, f"Emotion CM {title_suffix}", emotion_names, cmap='Blues')
 
     print("\n" + "="*40)
@@ -94,7 +94,7 @@ def evaluate_set(loader, model, device, title_suffix="(Validation)"):
     if len(all_labels_c) > 0:
         unique = sorted(list(set(all_labels_c)))
         names = [f"Lag {i}" for i in unique]
-        print(classification_report(all_labels_c, all_preds_c, labels=unique, target_names=names))
+        print(classification_report(all_labels_c, all_preds_c, labels=unique, target_names=names, zero_division=0))
         plot_cm(all_labels_c, all_preds_c, f"Cause CM {title_suffix}", names, cmap='Greens')
     else:
         print("No valid cause labels found.")

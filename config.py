@@ -10,12 +10,13 @@ if os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) not in sys.pat
 import torch
 
 CONFIG = {
-    'epochs': 30,
-    'lr': 3e-5,              # Base LR for BERT
-    'head_lr': 3e-4,         # Higher LR for classification heads
-    'batch_size': 16,
-    'max_len': 160,          # Large enough for 3 sentences
-    'weight_decay': 0.1,
+    'epochs': 50,
+    'lr': 5e-6,
+    'head_lr': 1e-5,
+    'batch_size': 32,
+    'max_len': 160,
+    'weight_decay': 0.05,
+    'early_stopping_patience': 8,
     'base_path': 'e:/dlcw',
     'model_save_path': 'best_model.pth',
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")

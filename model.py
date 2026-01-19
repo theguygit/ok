@@ -13,19 +13,23 @@ from transformers import RobertaModel, RobertaConfig
 class DualStreamMECPE(nn.Module):
     def __init__(self, num_emotions=7, window_size=6):
         super().__init__()
-        self.roberta = RobertaModel.from_pretrained('roberta-base')
-        # Unfreeze half of RoBERTa
+        config = RobertaConfig.from_pretrained('roberta-base')
+        config.hidden_dropout_prob = 0.3
+        config.attention_probs_dropout_prob = 0.3
+        self.roberta = RobertaModel.from_pretrained('roberta-base', config=config)
+        # Unfreeze last 6 layers of RoBERTa (Layers 6, 7, 8, 9, 10, 11)
         for layer in list(self.roberta.encoder.layer)[:6]:
             for param in layer.parameters(): param.requires_grad = False
 
         self.audio_fc = nn.Sequential(nn.Linear(768, 768), nn.ReLU(), nn.Dropout(0.3))
         self.cross_attention = nn.MultiheadAttention(embed_dim=768, num_heads=8, batch_first=True)
 
-        # Bi-LSTM over the sequence
+        # Bi-LSTM over the sequence (Restored hidden_size)
         self.lstm = nn.LSTM(input_size=768, hidden_size=256, num_layers=1, batch_first=True, bidirectional=True)
 
-        self.emotion_head = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.4), nn.Linear(256, num_emotions))
-        self.cause_head = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.4), nn.Linear(256, window_size))
+        # Input to heads is now 256*2 = 512
+        self.emotion_head = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.5), nn.Linear(256, num_emotions))
+        self.cause_head = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.5), nn.Linear(256, window_size))
 
     def forward(self, input_ids, attention_mask, audio_vec):
         text_seq = self.roberta(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
