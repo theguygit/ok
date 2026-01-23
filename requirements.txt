@@ -12,3 +12,4 @@ wordcloud
 moviepy
 gradio
 static-ffmpeg
+openai-whisper
