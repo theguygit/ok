@@ -5,15 +5,15 @@ Deep learning model for emotion recognition and causal span extraction from mult
 ## Project Structure
 
 ```
-e:/dlcw/
+.
 ├── config.py                  # Configuration and hyperparameters
 ├── dataset.py                 # Dataset class with robust ID mapping
 ├── model.py                   # DualStreamMECPE architecture
 ├── feature_extraction.py      # Audio feature extraction
 ├── eda.py                     # Exploratory Data Analysis
 ├── train.py                   # Training script
-├── evaluate.py                # Validation evaluation
-├── inference.py               # Test set inference
+├── evaluate.py                # Validation set evaluation
+├── test.py                    # Test set inference
 ├── app.py                     # Gradio dashboard
 ├── train_sent_emo.csv
 ├── dev_sent_emo.csv
@@ -35,10 +35,18 @@ e:/dlcw/
 pip install -r requirements.txt
 ```
 
+or
+
+```bash
+pip install --force-reinstall -r requirements.txt
+```
+
+(if you face dependency issues)
+
 ### 2. Install Additional Libraries (if needed)
 
 ```bash
-pip install moviepy==1.0.3 wordcloud
+pip install wordcloud
 ```
 
 ## Execution Order
@@ -52,7 +60,7 @@ Follow these steps **in order** to run the complete pipeline:
 Extract Wav2Vec2 features from video clips for all datasets.
 
 ```bash
-python e:/dlcw/feature_extraction.py
+python feature_extraction.py
 ```
 
 **Output:**
@@ -68,10 +76,10 @@ python e:/dlcw/feature_extraction.py
 Visualize data distributions and verify the dataset alignment.
 
 ```bash
-python e:/dlcw/eda.py
+python eda.py
 ```
 
-**Output:** PNG files saved to `e:/dlcw/`:
+**Output:** PNG files saved to project root:
 
 - `eda_train_emotion_dist.png`
 - `eda_train_cause_dist.png`
@@ -87,7 +95,7 @@ python e:/dlcw/eda.py
 Train the DualStreamMECPE model with differential learning rates and class weighting.
 
 ```bash
-python e:/dlcw/train.py
+python train.py
 ```
 
 **Output:**
@@ -104,19 +112,19 @@ python e:/dlcw/train.py
 
 ---
 
-### **Step 4: Evaluate on Dev Set** 📈
+### **Step 4: Evaluate on Validation Set** 📈
 
 Generate detailed metrics and confusion matrices on the validation set.
 
 ```bash
-python e:/dlcw/evaluate.py
+python evaluate.py
 ```
 
-**Output:** PNG files saved to `e:/dlcw/`:
+**Output:**
 
-- `emotion_cm_validation.png`
-- `cause_cm_validation.png`
+- PNG files: `emotion_cm_(val).png`, `cause_cm_(val).png`
 - Classification reports printed to console
+- Plot windows will popup (closes on exit)
 
 ---
 
@@ -125,12 +133,13 @@ python e:/dlcw/evaluate.py
 Run final inference on the test set.
 
 ```bash
-python e:/dlcw/inference.py
+python test.py
 ```
 
 **Output:**
 
 - Final test metrics printed to console
+- PNG files: `emotion_cm_(test_set).png`, `cause_cm_(test_set).png`
 - Emotion and Cause F1 scores
 - Combined F1 score
 
@@ -141,7 +150,7 @@ python e:/dlcw/inference.py
 Run the Gradio app for live emotion and cause prediction.
 
 ```bash
-python e:/dlcw/app.py
+python app.py
 ```
 
 **Features:**
@@ -153,31 +162,17 @@ python e:/dlcw/app.py
 
 ---
 
-## Quick Start (After Feature Extraction)
-
-If you've already extracted audio features:
-
-```bash
-# Train
-python e:/dlcw/train.py
-
-# Evaluate
-python e:/dlcw/evaluate.py
-
-# Test
-python e:/dlcw/inference.py
-```
-
 ## Configuration
 
 Edit `config.py` to modify:
 
-- `epochs`: Number of training epochs (default: 15)
-- `lr`: Base learning rate for RoBERTa (default: 3e-5)
-- `head_lr`: Learning rate for classification heads (default: 3e-4)
-- `batch_size`: Training batch size (default: 16)
+- `epochs`: Number of training epochs (default: 50)
+- `lr`: Base learning rate for RoBERTa (default: 5e-6)
+- `head_lr`: Learning rate for classification heads (default: 1e-5)
+- `batch_size`: Training batch size (default: 32)
 - `max_len`: Maximum sequence length (default: 160)
-- `weight_decay`: L2 regularization (default: 0.1)
+- `weight_decay`: L2 regularization (default: 0.05)
+- `base_path`: Root directory for data (default: `e:/dlcw`)
 
 ## Model Architecture
 
