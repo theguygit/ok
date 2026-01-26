@@ -2,7 +2,6 @@
 import sys
 import os
 
-# Add project root to sys.path
 if os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) not in sys.path:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -10,7 +9,7 @@ import torch
 import librosa
 import numpy as np
 import pickle
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 from tqdm import tqdm
 from config import CONFIG
@@ -20,12 +19,10 @@ def extract_features(video_folder, output_pkl):
     
     device = CONFIG['device']
     
-    # Check if folder exists
     if not os.path.exists(video_folder):
         print(f"Warning: Folder {video_folder} does not exist.")
         return
 
-    # Temp wav folder
     wav_folder = os.path.join(CONFIG['base_path'], 'temp_wavs')
     os.makedirs(wav_folder, exist_ok=True)
 
@@ -68,12 +65,10 @@ def extract_features(video_folder, output_pkl):
 
             audio_features_dict[file_id] = pooled_output
 
-            # Cleanup
             if os.path.exists(wav_path):
                 os.remove(wav_path)
 
         except Exception as e:
-            # print(f"Error processing {video_file}: {e}")
             error_files.append(video_file)
 
     print(f"\nExtraction Complete! Processed {len(audio_features_dict)} files.")
@@ -84,20 +79,18 @@ def extract_features(video_folder, output_pkl):
         pickle.dump(audio_features_dict, f)
 
 if __name__ == "__main__":
-    # 1. Training Set
     extract_features(
         os.path.join(CONFIG['base_path'], 'train_splits'), 
         os.path.join(CONFIG['base_path'], 'audio_features.pkl')
     )
 
-    # 2. Development Set
     extract_features(
         os.path.join(CONFIG['base_path'], 'dev_splits_complete'), 
         os.path.join(CONFIG['base_path'], 'dev_audio_features.pkl')
     )
 
-    # 3. Test Set
     extract_features(
         os.path.join(CONFIG['base_path'], 'test_splits'), 
         os.path.join(CONFIG['base_path'], 'audio_test.pkl')
     )
+

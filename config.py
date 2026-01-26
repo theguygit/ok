@@ -3,7 +3,6 @@ import os
 import sys
 import os
 
-# Add project root to sys.path
 if os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) not in sys.path:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -26,3 +25,4 @@ EMOTION_MAP = {
     'neutral': 0, 'joy': 1, 'surprise': 2, 'anger': 3,
     'sadness': 4, 'disgust': 5, 'fear': 6
 }
+
