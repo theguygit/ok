@@ -3,7 +3,6 @@ import os
 import sys
 import os
 
-# Add project root to sys.path
 if os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) not in sys.path:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -17,7 +16,7 @@ CONFIG = {
     'max_len': 160,
     'weight_decay': 0.05,
     'early_stopping_patience': 8,
-    'base_path': 'e:/dlcw',
+    'base_path': os.path.dirname(os.path.abspath(__file__)),
     'model_save_path': 'best_model.pth',
     'device': torch.device("cuda" if torch.cuda.is_available() else "cpu")
 }
@@ -26,3 +25,4 @@ EMOTION_MAP = {
     'neutral': 0, 'joy': 1, 'surprise': 2, 'anger': 3,
     'sadness': 4, 'disgust': 5, 'fear': 6
 }
+

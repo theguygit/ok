@@ -1,4 +1,4 @@
-torch
+torch>=2.0.0
 torchinfo
 transformers
 pandas
@@ -13,3 +13,5 @@ moviepy
 gradio
 static-ffmpeg
 openai-whisper
+torchvision>=0.21.0
+torchaudio>=2.0.0

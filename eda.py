@@ -2,7 +2,6 @@
 import sys
 import os
 
-# Add project root to sys.path
 if os.path.abspath(os.path.join(os.path.dirname(__file__), '..')) not in sys.path:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -18,10 +17,8 @@ from dataset import MECPEDataset
 def run_eda():
     print("📊 Starting Exploratory Data Analysis (EDA)...")
     
-    # Initialize Tokenizer (needed for Dataset)
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
     
-    # Paths
     files = {
         'Train': (os.path.join(CONFIG['base_path'], 'train_sent_emo.csv'), 
                   os.path.join(CONFIG['base_path'], 'Subtask_2_train.json'),
@@ -36,19 +33,13 @@ def run_eda():
             print(f"⚠️ Skipping {split_name}: Files not found.")
             continue
             
-        # Check audio
         if not os.path.exists(audio_path):
-            print(f"⚠️ Warning: Audio features ({audio_path}) not found. Creating dummy for EDA.")
-            # We create a dummy pickle just to load the dataset class, or patch it.
-            # For now, let's just create a dummy dict file if missing? No, that's risky.
-            # Let's assume user extracts features. If not, we fail gracefully.
             print("Please run src/feature_extraction.py first!")
             return
 
         print(f"\n--- Analyzing {split_name} Set ---")
         ds = MECPEDataset(csv_path, json_path, audio_path, tokenizer, CONFIG['max_len'])
         
-        # 1. EMOTION DISTRIBUTION
         emotions = [row['Emotion'] for _, row in ds.df.iterrows()]
         plt.figure(figsize=(10, 5))
         sns.countplot(y=emotions, order=ds.df['Emotion'].value_counts().index, palette='viridis')
@@ -58,8 +49,6 @@ def run_eda():
         print(f"✅ Saved: {save_path}")
         plt.close()
         
-        # 2. CAUSE DISTRIBUTION
-        # We need to iterate the dataset to get the robustly mapped labels
         cause_labels = []
         for i in range(len(ds)):
             l = ds[i]['cause_label'].item()
@@ -68,7 +57,6 @@ def run_eda():
                 
         if cause_labels:
             plt.figure(figsize=(8, 5))
-            # countplot for integers
             sns.countplot(x=cause_labels, palette='magma')
             plt.title(f'{split_name} - Causal Lag Distribution (0=Self, 1=Prev...)')
             plt.xlabel("Lag Distance")
@@ -83,7 +71,7 @@ def run_eda():
         else:
             print("❌ No valid cause labels found! Check mapping logic.")
 
-        # 3. TEXT LENGTH
+
         lengths = [len(str(r['Utterance']).split()) for _, r in ds.df.iterrows()]
         plt.figure(figsize=(10, 5))
         sns.histplot(lengths, bins=30, kde=True, color='skyblue')
@@ -94,11 +82,9 @@ def run_eda():
         print(f"✅ Saved: {save_path}")
         plt.close()
 
-        # 4. WORD CLOUD (Weighted by Emotion)
         try:
             from wordcloud import WordCloud
             print("Generating Word Clouds...")
-            # Combine all text
             all_text = " ".join([str(t) for t in ds.df['Utterance']])
             wc = WordCloud(width=800, height=400, background_color='white').generate(all_text)
             
@@ -113,8 +99,6 @@ def run_eda():
         except ImportError:
             print("Skipping WordCloud (library not installed).")
 
-        # 5. CONTEXTUAL ANALYSIS (Emotion Transitions)
-        # Verify if previous emotion predicts current emotion
         print("Analyzing Emotion Transitions...")
         transitions = []
         df = ds.df

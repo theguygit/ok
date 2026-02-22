@@ -9,22 +9,19 @@ from torch.optim import AdamW
 import numpy as np
 from tqdm import tqdm
 import collections
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, precision_score, recall_score, classification_report
+import json
+import matplotlib.pyplot as plt
 
 from config import CONFIG, EMOTION_MAP
 from dataset import MECPEDataset
 from model import DualStreamMECPE
 
 def get_optimizer_params(model, base_lr, weight_decay=0.01):
-    # Layer-wise Learning Rate Decay (LLRD) for RoBERTa
     param_optimizer = list(model.named_parameters())
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     
-    # Differential learning rates for different parts of the model
     optimizer_grouped_parameters = []
-    
-    # 1. RoBERTa Layers (with decay per layer)
-    # We use a decay factor of 0.9 per layer (from top to bottom)
     for i in range(12):
         lr = base_lr * (0.9 ** (11 - i))
         optimizer_grouped_parameters.append({
@@ -36,7 +33,6 @@ def get_optimizer_params(model, base_lr, weight_decay=0.01):
             "weight_decay": 0.0, "lr": lr
         })
         
-    # 2. Heads and Fusion (Higher LR)
     head_params = [p for n, p in param_optimizer if "roberta" not in n]
     optimizer_grouped_parameters.append({
         "params": head_params, "weight_decay": weight_decay, "lr": CONFIG.get('head_lr', 1e-4)
@@ -66,14 +62,13 @@ def train():
         try: model.load_state_dict(torch.load(save_path, map_location=device))
         except: print("⚠️ Starting fresh.")
     
-    # Best-Practice Optimizer Config
     opt_params = get_optimizer_params(model, CONFIG['lr'], CONFIG['weight_decay'])
     optimizer = AdamW(opt_params)
     
     total_steps = len(train_loader) * CONFIG['epochs']
     scheduler = get_cosine_schedule_with_warmup(optimizer, num_warmup_steps=int(0.1*total_steps), num_training_steps=total_steps)
 
-    # Weights and Criteria
+
     total_e = len(train_ds.df)
     counts_e = collections.Counter(train_ds.df['Emotion'].str.lower())
     weights_e = torch.tensor([total_e/(len(EMOTION_MAP)*counts_e.get(e,1)) for e in EMOTION_MAP.keys()]).float().to(device)
@@ -114,38 +109,63 @@ def train():
             preds_c.append((torch.sigmoid(out_c)>0.5).float().cpu().detach().numpy())
             labels_c.append(lbl_c.cpu().numpy())
 
-        # Validation
+
         model.eval()
         v_preds_e, v_labels_e, v_preds_c, v_labels_c = [], [], [], []
+        val_loss = 0
         with torch.no_grad():
             for batch in dev_loader:
-                out_e, out_e_metric, out_c = model(batch['input_ids'].to(device), batch['attention_mask'].to(device), batch['audio_vec'].to(device))
+                ids, mask, audio = batch['input_ids'].to(device), batch['attention_mask'].to(device), batch['audio_vec'].to(device)
+                lbl_e, lbl_c = batch['emotion_label'].to(device), batch['cause_label'].to(device)
+                
+                out_e, out_e_metric, out_c = model(ids, mask, audio, emotion_label=lbl_e)
+                loss = 0.5*criterion_e(out_e, lbl_e) + 0.5*criterion_c(out_c, lbl_c)
+                val_loss += loss.item()
+                
                 v_preds_e.extend(torch.argmax(out_e_metric, dim=1).cpu().numpy())
-                v_labels_e.extend(batch['emotion_label'].cpu().numpy())
+                v_labels_e.extend(lbl_e.cpu().numpy())
                 v_preds_c.append((torch.sigmoid(out_c)>0.5).float().cpu().numpy())
-                v_labels_c.append(batch['cause_label'].cpu().numpy())
+                v_labels_c.append(lbl_c.cpu().numpy())
 
-        # Scores
+
+
         train_preds_c, train_labels_c = np.concatenate(preds_c, 0), np.concatenate(labels_c, 0)
         v_preds_c, v_labels_c = np.concatenate(v_preds_c, 0), np.concatenate(v_labels_c, 0)
 
         results = {
+            'train_loss': train_loss/len(train_loader),
+            'val_loss': val_loss/len(dev_loader),
             'tr_f1_e_m': f1_score(labels_e, preds_e, average='macro'),
             'tr_f1_e_w': f1_score(labels_e, preds_e, average='weighted'),
-            'tr_f1_c_m': f1_score(train_labels_c, train_preds_c, average='macro', zero_division=0),
-            'tr_f1_c_w': f1_score(train_labels_c, train_preds_c, average='weighted', zero_division=0),
+            'tr_prec_e_m': precision_score(labels_e, preds_e, average='macro', zero_division=0),
+            'tr_rec_e_m': recall_score(labels_e, preds_e, average='macro', zero_division=0),
             'val_f1_e_m': f1_score(v_labels_e, v_preds_e, average='macro'),
             'val_f1_e_w': f1_score(v_labels_e, v_preds_e, average='weighted'),
+            'val_prec_e_m': precision_score(v_labels_e, v_preds_e, average='macro', zero_division=0),
+            'val_rec_e_m': recall_score(v_labels_e, v_preds_e, average='macro', zero_division=0),
+            'tr_f1_c_m': f1_score(train_labels_c, train_preds_c, average='macro', zero_division=0),
+            'tr_f1_c_w': f1_score(train_labels_c, train_preds_c, average='weighted', zero_division=0),
+            'tr_prec_c_m': precision_score(train_labels_c, train_preds_c, average='macro', zero_division=0),
+            'tr_rec_c_m': recall_score(train_labels_c, train_preds_c, average='macro', zero_division=0),
             'val_f1_c_m': f1_score(v_labels_c, v_preds_c, average='macro', zero_division=0),
-            'val_f1_c_w': f1_score(v_labels_c, v_preds_c, average='weighted', zero_division=0)
+            'val_f1_c_w': f1_score(v_labels_c, v_preds_c, average='weighted', zero_division=0),
+            'val_prec_c_m': precision_score(v_labels_c, v_preds_c, average='macro', zero_division=0),
+            'val_rec_c_m': recall_score(v_labels_c, v_preds_c, average='macro', zero_division=0),
         }
 
         for k, v in results.items(): history[k].append(v)
-        history['train_loss'].append(train_loss/len(train_loader))
 
         print(f"\n📊 Epoch {epoch+1}:")
-        print(f"   [Train] Emo F1 (M/W): {results['tr_f1_e_m']:.4f}/{results['tr_f1_e_w']:.4f} | Cause F1 (M/W): {results['tr_f1_c_m']:.4f}/{results['tr_f1_c_w']:.4f}")
-        print(f"   [Val]   Emo F1 (M/W): {results['val_f1_e_m']:.4f}/{results['val_f1_e_w']:.4f} | Cause F1 (M/W): {results['val_f1_c_m']:.4f}/{results['val_f1_c_w']:.4f}")
+        print(f"   [Loss] Train: {results['train_loss']:.4f} | Val: {results['val_loss']:.4f}")
+        print(f"   [Train] Emo F1 (M/W): {results['tr_f1_e_m']:.4f}/{results['tr_f1_e_w']:.4f} | Prec/Rec: {results['tr_prec_e_m']:.4f}/{results['tr_rec_e_m']:.4f}")
+        print(f"   [Val]   Emo F1 (M/W): {results['val_f1_e_m']:.4f}/{results['val_f1_e_w']:.4f} | Prec/Rec: {results['val_prec_e_m']:.4f}/{results['val_rec_e_m']:.4f}")
+        print(f"   [Train] Cause F1 (M/W): {results['tr_f1_c_m']:.4f}/{results['tr_f1_c_w']:.4f} | Prec/Rec: {results['tr_prec_c_m']:.4f}/{results['tr_rec_c_m']:.4f}")
+        print(f"   [Val]   Cause F1 (M/W): {results['val_f1_c_m']:.4f}/{results['val_f1_c_w']:.4f} | Prec/Rec: {results['val_prec_c_m']:.4f}/{results['val_rec_c_m']:.4f}")
+        
+        if (epoch + 1) % 5 == 0:
+            print("\n📋 Detailed Emotion Classification Report (Validation):")
+            emotion_names = list(EMOTION_MAP.keys())
+            print(classification_report(v_labels_e, v_preds_e, target_names=emotion_names, zero_division=0))
         
         score = 0.5*results['val_f1_e_m'] + 0.5*results['val_f1_c_m']
         if score > best_score:
@@ -156,12 +176,109 @@ def train():
             print("⏹️ Early stopping!"); break
         else: patience_counter += 1
 
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(18, 5))
-    plt.subplot(1, 3, 1); plt.plot(history['train_loss']); plt.title('Loss'); plt.grid(True)
-    plt.subplot(1, 3, 2); plt.plot(history['val_f1_e_m'], label='Macro'); plt.plot(history['val_f1_e_w'], '--', label='Weighted'); plt.title('Emo F1'); plt.legend(); plt.grid(True)
-    plt.subplot(1, 3, 3); plt.plot(history['val_f1_c_m'], label='Macro'); plt.plot(history['val_f1_c_w'], '--', label='Weighted'); plt.title('Cause F1'); plt.legend(); plt.grid(True)
-    plt.tight_layout(); plt.savefig(os.path.join(CONFIG['base_path'], 'training_results.png'), dpi=300)
+    history_path = os.path.join(CONFIG['base_path'], 'training_history.json')
+    with open(history_path, 'w') as f:
+        json.dump(history, f, indent=2)
+    print(f"\n💾 Training history saved to: {history_path}")
+    
+    epochs_range = range(1, len(history['train_loss']) + 1)
+    
+    fig = plt.figure(figsize=(20, 12))
+    
+    ax1 = plt.subplot(3, 3, 1)
+    plt.plot(epochs_range, history['train_loss'], 'b-', label='Train Loss', linewidth=2)
+    plt.plot(epochs_range, history['val_loss'], 'r-', label='Val Loss', linewidth=2)
+    plt.title('Training & Validation Loss', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax2 = plt.subplot(3, 3, 2)
+    plt.plot(epochs_range, history['tr_f1_e_m'], 'b--', label='Train F1 (Macro)', linewidth=2, alpha=0.7)
+    plt.plot(epochs_range, history['val_f1_e_m'], 'r-', label='Val F1 (Macro)', linewidth=2)
+    plt.plot(epochs_range, history['val_f1_e_w'], 'r--', label='Val F1 (Weighted)', linewidth=2, alpha=0.7)
+    plt.title('Emotion Recognition F1', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('F1 Score')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax3 = plt.subplot(3, 3, 3)
+    plt.plot(epochs_range, history['val_prec_e_m'], 'g-', label='Val Precision', linewidth=2)
+    plt.plot(epochs_range, history['val_rec_e_m'], 'orange', label='Val Recall', linewidth=2)
+    plt.title('Emotion Precision & Recall', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Score')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax4 = plt.subplot(3, 3, 4)
+    plt.plot(epochs_range, history['tr_f1_c_m'], 'b--', label='Train F1 (Macro)', linewidth=2, alpha=0.7)
+    plt.plot(epochs_range, history['val_f1_c_m'], 'r-', label='Val F1 (Macro)', linewidth=2)
+    plt.plot(epochs_range, history['val_f1_c_w'], 'r--', label='Val F1 (Weighted)', linewidth=2, alpha=0.7)
+    plt.title('Cause Extraction F1', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('F1 Score')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax5 = plt.subplot(3, 3, 5)
+    plt.plot(epochs_range, history['val_prec_c_m'], 'g-', label='Val Precision', linewidth=2)
+    plt.plot(epochs_range, history['val_rec_c_m'], 'orange', label='Val Recall', linewidth=2)
+    plt.title('Cause Precision & Recall', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Score')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax6 = plt.subplot(3, 3, 6)
+    combined_scores = [0.5*e + 0.5*c for e, c in zip(history['val_f1_e_m'], history['val_f1_c_m'])]
+    plt.plot(epochs_range, combined_scores, 'purple', label='Combined Score', linewidth=2)
+    plt.axhline(y=best_score, color='r', linestyle='--', label=f'Best: {best_score:.4f}')
+    plt.title('Combined Validation Score', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('Score')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax7 = plt.subplot(3, 3, 7)
+    plt.plot(epochs_range, history['tr_f1_e_m'], 'b-', label='Train', linewidth=2)
+    plt.plot(epochs_range, history['val_f1_e_m'], 'r-', label='Validation', linewidth=2)
+    plt.title('Emotion F1: Train vs Val', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('F1 Score (Macro)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax8 = plt.subplot(3, 3, 8)
+    plt.plot(epochs_range, history['tr_f1_c_m'], 'b-', label='Train', linewidth=2)
+    plt.plot(epochs_range, history['val_f1_c_m'], 'r-', label='Validation', linewidth=2)
+    plt.title('Cause F1: Train vs Val', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('F1 Score (Macro)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    ax9 = plt.subplot(3, 3, 9)
+    emo_gap = [t - v for t, v in zip(history['tr_f1_e_m'], history['val_f1_e_m'])]
+    cause_gap = [t - v for t, v in zip(history['tr_f1_c_m'], history['val_f1_c_m'])]
+    plt.plot(epochs_range, emo_gap, 'b-', label='Emotion Gap', linewidth=2)
+    plt.plot(epochs_range, cause_gap, 'r-', label='Cause Gap', linewidth=2)
+    plt.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    plt.title('Train-Val Gap (Overfitting)', fontsize=12, fontweight='bold')
+    plt.xlabel('Epoch')
+    plt.ylabel('F1 Gap (Train - Val)')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.suptitle('MECPE Training Curves - Comprehensive Analysis', fontsize=16, fontweight='bold', y=0.995)
+    plt.tight_layout()
+    
+    plot_path = os.path.join(CONFIG['base_path'], 'training_curves.png')
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    print(f"📊 Training curves saved to: {plot_path}")
+    plt.close()
 
 if __name__ == "__main__":
     train()
