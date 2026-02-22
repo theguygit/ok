@@ -44,3 +44,4 @@ temp_wavs/
 # OS
 Thumbs.db
 .DS_Store
+.gradio_temp/
