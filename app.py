@@ -57,12 +57,12 @@ def process_call(audio_path, text_input):
         text_input = transcribe_audio(audio_path)
     
     print(f"⚙️ Processing - Text: {len(text_input)} chars, Audio: {audio_path is not None}")
-    if not audio_path and not text_input: 
+    if not audio_path and (not text_input or text_input.strip() == ""): 
         return "⚠️ Please provide audio or text.", {}, ""
 
     try:
         if audio_path:
-            y, sr = librosa.load(audio_path, sr=16000, duration=15.0)
+            y, sr = librosa.load(audio_path, sr=16000, duration=60.0) # Increased to 60s
             input_vals = audio_processor(y, sampling_rate=16000, return_tensors="pt", padding="longest").input_values.to(DEVICE)
             with torch.no_grad(): 
                 audio_vec = torch.mean(audio_model_feat(input_vals).last_hidden_state, dim=1)
@@ -75,12 +75,22 @@ def process_call(audio_path, text_input):
             _, out_e_metric, out_c = model(ti['input_ids'], ti['attention_mask'], audio_vec)
             p_e = torch.nn.functional.softmax(out_e_metric, dim=1)[0]
             p_c = torch.sigmoid(out_c)[0]
-            causes = [f"Turn {i} ({p_c[i]:.0%})" for i in range(6) if p_c[i] > 0.35]
 
-        emo_idx = torch.argmax(p_e).item()
-        confidence = p_e[emo_idx].item()
+            # Cause Extraction: Map indices to text
+            text_turns = [t.strip() for t in text_input.replace("[SEP]", "\n").replace("</s>", "\n").split("\n") if t.strip()]
+            
+            causes = []
+            for i in range(min(len(text_turns), 6)):
+                if p_c[i] > 0.35:
+                    turn_text = text_turns[-(i+1)]
+                    label = "Current Turn" if i == 0 else f"Turn -{i}"
+                    causes.append(f"> **{label}**: \"{turn_text}\" ({p_c[i]:.0%})")
+
+            emo_idx = torch.argmax(p_e).item()
+            confidence = p_e[emo_idx].item()
         
-        report = f"### 📊 Analysis Results\n\n**Detected Emotion:** `{EMOTIONS[emo_idx].upper()}` ({confidence:.1%})\n\n**Probable Causes:** {', '.join(causes) if causes else '_None detected._'}"
+        cause_report = "\n".join(causes) if causes else "_No specific cause identified._"
+        report = f"### 📊 Analysis Results\n\n**Detected Emotion:** `{EMOTIONS[emo_idx].upper()}` ({confidence:.1%})\n\n**Why? (Causal Turns):**\n{cause_report}"
         labels = {EMOTIONS[i]: float(p_e[i]) for i in range(7)}
         
         return report, labels, text_input
@@ -95,16 +105,26 @@ def launch_app():
         
         with gr.Row():
             with gr.Column(scale=1):
-                audio_input = gr.Audio(sources=["microphone", "upload"], type="filepath", label="1. Customer Voice")
-                transcribe_btn = gr.Button("📝 Extract Transcript (Optional)", variant="secondary")
-                text_input = gr.Textbox(label="2. Transcript (Model will use this)", lines=4, placeholder="Transcription will appear here...")
+                audio_input = gr.Audio(sources=["microphone", "upload"], type="filepath", label="1. Customer Voice (Max 60s)")
+                transcribe_btn = gr.Button("📝 Extract Transcript", variant="secondary")
+                text_input = gr.Textbox(
+                    label="2. Interaction Transcript", 
+                    lines=6, 
+                    placeholder="Enter dialogue turns here (one per line) or use 'Extract Transcript' from audio.\nThe last line is treated as the current utterance."
+                )
                 with gr.Row():
-                    analyze_btn = gr.Button("🚀 ANALYZE INTERACTION", variant="primary", scale=2)
+                    analyze_btn = gr.Button("🚀 ANALYZE", variant="primary", scale=2)
                     reset_btn = gr.Button("🔄 Reset", variant="secondary", scale=1)
             
             with gr.Column(scale=1):
-                output_md = gr.Markdown("### 🔍 Analysis Output\n_Waiting for input..._")
-                output_chart = gr.Label(label="Emotion Confidence Scores")
+                output_md = gr.Markdown("### 🔍 Analysis Output\n_Submit audio or text to see results._")
+                output_chart = gr.Label(label="Emotion Confidence")
+                gr.Markdown("""
+                > [!TIP]
+                > **How it works:**
+                > - Upload audio to get a transcription, then click **ANALYZE**.
+                > - Or type a multi-turn conversation. The model looks back up to 5 turns to find the **cause** of the current emotion.
+                """)
 
         transcribe_btn.click(transcribe_audio, inputs=[audio_input], outputs=[text_input])
         
